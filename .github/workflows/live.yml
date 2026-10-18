@@ -3,7 +3,7 @@ name: Daily live Rosary
 # Mysteries by day (Singapore time): Mon Joyful, Tue Sorrowful, Wed Glorious, Thu Luminous, Fri Sorrowful,
 # Sat Joyful, Sun Glorious. The videos in videos/ are rendered in the private production repository and copied here.
 # Stream key: repository secret YT_STREAM_KEY (never in the repository or logs).
-# The daily schedule only runs when the repository variable DAILY_LIVE is 'true'.
+# The daily schedule starts on 7 Nov 2026 (Anil, 19 Oct 2026). To pause it, set repository variable DAILY_LIVE to 'false'.
 on:
   workflow_dispatch:
     inputs:
@@ -23,7 +23,7 @@ permissions:
   contents: read
 jobs:
   live:
-    if: github.event_name == 'workflow_dispatch' || vars.DAILY_LIVE == 'true'
+    if: github.event_name == 'workflow_dispatch' || vars.DAILY_LIVE != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:
@@ -36,6 +36,9 @@ jobs:
         with: {lfs: false}
       - name: Check
         run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(TZ=Asia/Singapore date +%Y%m%d)" -lt 20261107 ]; then
+            echo "::notice::daily Rosary starts on 7 Nov 2026 - nothing streamed today"; echo "SKIP=1" >> $GITHUB_ENV; exit 0
+          fi
           if [ -z "$KEY" ]; then echo "::error::secret YT_STREAM_KEY is not set - nothing streamed"; exit 1; fi
           if [ "$MSET" = "auto" ]; then
             case "$(TZ=Asia/Singapore date +%u)" in 1|6) MSET=joyful;; 2|5) MSET=sorrowful;; 3|7) MSET=glorious;; 4) MSET=luminous;; esac
@@ -46,13 +49,15 @@ jobs:
           echo "V=$V" >> $GITHUB_ENV
           echo "::notice::today: $MSET ($V) | test minutes: $TEST_MIN | start: ${START:-now}"
       - name: Install ffmpeg
+        if: env.SKIP != '1'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
       - name: Wait for the start time
-        if: env.START != ''
+        if: env.START != '' && env.SKIP != '1'
         run: |
           T=$(TZ=Asia/Singapore date -d "$START" +%s); N=$(date +%s)
           if [ "$T" -gt "$N" ]; then echo "::notice::waiting $(( (T-N) )) s for $START SGT"; sleep $((T-N)); fi
       - name: Stream to YouTube
+        if: env.SKIP != '1'
         run: |
           LIM=(); if [ "$TEST_MIN" != "0" ]; then LIM=(-t $((TEST_MIN*60))); fi
           echo "::notice::streaming started $(TZ=Asia/Singapore date '+%a %d %b %H:%M:%S SGT')"

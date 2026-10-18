@@ -1,0 +1,60 @@
+name: Daily live Rosary
+# Streams the day's pray-along Rosary to YouTube at 18:00 Singapore time (RTMPS, ffmpeg -c copy, no re-encode).
+# Mysteries by day (Singapore time): Mon Joyful, Tue Sorrowful, Wed Glorious, Thu Luminous, Fri Sorrowful,
+# Sat Joyful, Sun Glorious. The videos in videos/ are rendered in the private production repository and copied here.
+# Stream key: repository secret YT_STREAM_KEY (never in the repository or logs).
+# The daily schedule only runs when the repository variable DAILY_LIVE is 'true'.
+on:
+  workflow_dispatch:
+    inputs:
+      mset:
+        description: "joyful | sorrowful | glorious | luminous | auto (by day of the week)"
+        default: "auto"
+      test_minutes:
+        description: "Stream only the first N minutes (0 = the whole Rosary)"
+        default: "5"
+      start_sgt:
+        description: "Start at this SGT time today (HH:MM), or blank to start now"
+        default: ""
+  schedule:
+    - cron: "45 9 * * *"   # 17:45 SGT daily; the job waits until 18:00 SGT
+concurrency: {group: live-rosary, cancel-in-progress: false}
+permissions:
+  contents: read
+jobs:
+  live:
+    if: github.event_name == 'workflow_dispatch' || vars.DAILY_LIVE == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      MSET: ${{ github.event.inputs.mset || 'auto' }}
+      TEST_MIN: ${{ github.event.inputs.test_minutes || '0' }}
+      START: ${{ github.event_name == 'schedule' && '18:00' || github.event.inputs.start_sgt }}
+      KEY: ${{ secrets.YT_STREAM_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {lfs: false}
+      - name: Check
+        run: |
+          if [ -z "$KEY" ]; then echo "::error::secret YT_STREAM_KEY is not set - nothing streamed"; exit 1; fi
+          if [ "$MSET" = "auto" ]; then
+            case "$(TZ=Asia/Singapore date +%u)" in 1|6) MSET=joyful;; 2|5) MSET=sorrowful;; 3|7) MSET=glorious;; 4) MSET=luminous;; esac
+          fi
+          M=$([ "$(TZ=Asia/Singapore date +%m)" = "11" ] && echo "-nov" || echo "")
+          V=videos/$MSET$M.mp4; [ -f "$V" ] || V=videos/$MSET.mp4
+          [ -f "$V" ] || { echo "::error::$V missing"; exit 1; }
+          echo "V=$V" >> $GITHUB_ENV
+          echo "::notice::today: $MSET ($V) | test minutes: $TEST_MIN | start: ${START:-now}"
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+      - name: Wait for the start time
+        if: env.START != ''
+        run: |
+          T=$(TZ=Asia/Singapore date -d "$START" +%s); N=$(date +%s)
+          if [ "$T" -gt "$N" ]; then echo "::notice::waiting $(( (T-N) )) s for $START SGT"; sleep $((T-N)); fi
+      - name: Stream to YouTube
+        run: |
+          LIM=(); if [ "$TEST_MIN" != "0" ]; then LIM=(-t $((TEST_MIN*60))); fi
+          echo "::notice::streaming started $(TZ=Asia/Singapore date '+%a %d %b %H:%M:%S SGT')"
+          ffmpeg -hide_banner -loglevel warning -re -i "$V" "${LIM[@]}" -c copy -f flv "rtmps://a.rtmps.youtube.com:443/live2/$KEY"
+          echo "::notice::streaming finished $(TZ=Asia/Singapore date '+%H:%M:%S SGT')"

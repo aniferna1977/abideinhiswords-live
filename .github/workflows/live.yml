@@ -3,7 +3,7 @@ name: Daily live Rosary
 # Mysteries by day (Singapore time): Mon Joyful, Tue Sorrowful, Wed Glorious, Thu Luminous, Fri Sorrowful,
 # Sat Joyful, Sun Glorious. The videos in videos/ are rendered in the private production repository and copied here.
 # Stream key: repository secret YT_STREAM_KEY (never in the repository or logs).
-# The daily schedule starts on 7 Nov 2026 (Anil, 19 Oct 2026). To pause it, set repository variable DAILY_LIVE to 'false'.
+# The daily schedule starts on 1 Nov 2026 (Anil, 19 Oct 2026; moved from 7 Nov). To pause it, set repository variable DAILY_LIVE to 'false'.
 on:
   workflow_dispatch:
     inputs:
@@ -36,8 +36,8 @@ jobs:
         with: {lfs: false}
       - name: Check
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(TZ=Asia/Singapore date +%Y%m%d)" -lt 20261107 ]; then
-            echo "::notice::daily Rosary starts on 7 Nov 2026 - nothing streamed today"; echo "SKIP=1" >> $GITHUB_ENV; exit 0
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(TZ=Asia/Singapore date +%Y%m%d)" -lt 20261101 ]; then
+            echo "::notice::daily Rosary starts on 1 Nov 2026 - nothing streamed today"; echo "SKIP=1" >> $GITHUB_ENV; exit 0
           fi
           if [ -z "$KEY" ]; then echo "::error::secret YT_STREAM_KEY is not set - nothing streamed"; exit 1; fi
           if [ "$MSET" = "auto" ]; then

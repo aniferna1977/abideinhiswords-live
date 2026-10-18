@@ -44,8 +44,12 @@ jobs:
             case "$(TZ=Asia/Singapore date +%u)" in 1|6) MSET=joyful;; 2|5) MSET=sorrowful;; 3|7) MSET=glorious;; 4) MSET=luminous;; esac
           fi
           M=$([ "$(TZ=Asia/Singapore date +%m)" = "11" ] && echo "-nov" || echo "")
-          V=videos/$MSET$M.mp4; [ -f "$V" ] || V=videos/$MSET.mp4
-          [ -f "$V" ] || { echo "::error::$V missing"; exit 1; }
+          # videos are stored as <name>.mp4.part00, part01 ... (GitHub's 100 MB file limit); join them and check the hash
+          N=$MSET$M; ls videos/$N.mp4.part* > /dev/null 2>&1 || N=$MSET
+          ls videos/$N.mp4.part* > /dev/null 2>&1 || { echo "::error::videos/$N.mp4.part* missing"; exit 1; }
+          cat videos/$N.mp4.part* > videos/$N.mp4
+          (cd videos && sha256sum -c $N.sha256) || { echo "::error::$N.mp4 is damaged"; exit 1; }
+          V=videos/$N.mp4
           echo "V=$V" >> $GITHUB_ENV
           echo "::notice::today: $MSET ($V) | test minutes: $TEST_MIN | start: ${START:-now}"
       - name: Install ffmpeg

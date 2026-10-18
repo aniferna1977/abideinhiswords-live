@@ -45,8 +45,8 @@ jobs:
           fi
           M=$([ "$(TZ=Asia/Singapore date +%m)" = "11" ] && echo "-nov" || echo "")
           # videos are stored as <name>.mp4.part00, part01 ... (GitHub's 100 MB file limit); join them and check the hash
-          N=$MSET$M; ls videos/$N.mp4.part* > /dev/null 2>&1 || N=$MSET
-          ls videos/$N.mp4.part* > /dev/null 2>&1 || { echo "::error::videos/$N.mp4.part* missing"; exit 1; }
+          N=""; for c in $MSET$M $MSET $MSET-nov; do ls videos/$c.mp4.part* > /dev/null 2>&1 && { N=$c; break; }; done
+          [ -n "$N" ] || { echo "::error::no video parts for $MSET in videos/"; exit 1; }
           cat videos/$N.mp4.part* > videos/$N.mp4
           (cd videos && sha256sum -c $N.sha256) || { echo "::error::$N.mp4 is damaged"; exit 1; }
           V=videos/$N.mp4

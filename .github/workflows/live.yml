@@ -52,10 +52,16 @@ jobs:
           V=videos/$N.mp4
           # "Tonight we pray for" card (viewers' intentions, made in the private repo): shown before AND after the Rosary
           # while current (videos/intentions.until = last day, YYYYMMDD). Same encoding, so it is joined with -c copy.
+          # otherwise the generic card ("for everyone gathered here, and for all your intentions", Anil 20 Oct).
+          C=""
           if [ -f videos/intentions.mp4 ] && [ "$(cat videos/intentions.until 2>/dev/null || echo 0)" -ge "$(TZ=Asia/Singapore date +%Y%m%d)" ]; then
-            printf "file 'intentions.mp4'\nfile '%s'\nfile 'intentions.mp4'\n" "$N.mp4" > videos/today.txt
+            C=intentions.mp4; echo "::notice::named intentions card (current until $(cat videos/intentions.until))"
+          elif [ -f videos/intentions_generic.mp4 ]; then
+            C=intentions_generic.mp4; echo "::notice::generic intentions card"
+          fi
+          if [ -n "$C" ]; then
+            printf "file '%s'\nfile '%s'\nfile '%s'\n" "$C" "$N.mp4" "$C" > videos/today.txt
             V=videos/today.txt; echo "CONCAT=1" >> $GITHUB_ENV
-            echo "::notice::intentions card included (current until $(cat videos/intentions.until))"
           fi
           echo "V=$V" >> $GITHUB_ENV
           echo "::notice::today: $MSET ($V) | test minutes: $TEST_MIN | start: ${START:-now}"

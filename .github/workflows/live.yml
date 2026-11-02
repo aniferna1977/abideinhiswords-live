@@ -1,0 +1,85 @@
+name: Daily live Rosary
+# Streams the day's pray-along Rosary to YouTube at 20:00 Singapore time (moved from 18:00 on 1 Nov 2026, Anil) (RTMPS, ffmpeg -c copy, no re-encode).
+# Mysteries by day (Singapore time): Mon Joyful, Tue Sorrowful, Wed Glorious, Thu Luminous, Fri Sorrowful,
+# Sat Joyful, Sun Glorious; 25 Dec and 1 Jan always Joyful. The videos in videos/ are rendered in the private production repository and copied here.
+# Stream key: repository secret YT_STREAM_KEY (never in the repository or logs).
+# The daily schedule starts on 1 Nov 2026 (Anil, 19 Oct 2026; moved from 7 Nov). To pause it, set repository variable DAILY_LIVE to 'false'.
+on:
+  workflow_dispatch:
+    inputs:
+      mset:
+        description: "joyful | sorrowful | glorious | luminous | auto (by day of the week)"
+        default: "auto"
+      test_minutes:
+        description: "Stream only the first N minutes (0 = the whole Rosary)"
+        default: "5"
+      start_sgt:
+        description: "Start at this SGT time today (HH:MM), or blank to start now"
+        default: ""
+  schedule:
+    - cron: "30 10 * * *"   # 18:30 SGT daily; GitHub often starts scheduled runs 30-45 min late, so the job waits until 20:00 SGT
+concurrency: {group: live-rosary, cancel-in-progress: false}
+permissions:
+  contents: read
+jobs:
+  live:
+    if: github.event_name == 'workflow_dispatch' || vars.DAILY_LIVE != 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    env:
+      MSET: ${{ github.event.inputs.mset || 'auto' }}
+      TEST_MIN: ${{ github.event.inputs.test_minutes || '0' }}
+      START: ${{ github.event_name == 'schedule' && '20:00' || github.event.inputs.start_sgt }}
+      KEY: ${{ secrets.YT_STREAM_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {lfs: false}
+      - name: Check
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(TZ=Asia/Singapore date +%Y%m%d)" -lt 20261101 ]; then
+            echo "::notice::daily Rosary starts on 1 Nov 2026 - nothing streamed today"; echo "SKIP=1" >> $GITHUB_ENV; exit 0
+          fi
+          if [ -z "$KEY" ]; then echo "::error::secret YT_STREAM_KEY is not set - nothing streamed"; exit 1; fi
+          if [ "$MSET" = "auto" ]; then
+            case "$(TZ=Asia/Singapore date +%u)" in 1|6) MSET=joyful;; 2|5) MSET=sorrowful;; 3|7) MSET=glorious;; 4) MSET=luminous;; esac
+            # Christmas Day and 1 January (Mary, Mother of God) are joyful days: Joyful Mysteries whatever the weekday (Anil, 2 Nov 2026)
+            case "$(TZ=Asia/Singapore date +%m%d)" in 1225|0101) MSET=joyful;; esac
+          fi
+          M=$([ "$(TZ=Asia/Singapore date +%m)" = "11" ] && echo "-nov" || echo "")
+          # videos are stored as <name>.mp4.part00, part01 ... (GitHub's 100 MB file limit); join them and check the hash
+          N=""; for c in $MSET$M $MSET $MSET-nov; do ls videos/$c.mp4.part* > /dev/null 2>&1 && { N=$c; break; }; done
+          [ -n "$N" ] || { echo "::error::no video parts for $MSET in videos/"; exit 1; }
+          cat videos/$N.mp4.part* > videos/$N.mp4
+          (cd videos && sha256sum -c $N.sha256) || { echo "::error::$N.mp4 is damaged"; exit 1; }
+          V=videos/$N.mp4
+          # "Tonight we pray for" card (viewers' intentions, made in the private repo): shown before AND after the Rosary
+          # while current (videos/intentions.until = last day, YYYYMMDD). Same encoding, so it is joined with -c copy.
+          # otherwise the generic card ("for everyone gathered here, and for all your intentions", Anil 20 Oct).
+          C=""
+          if [ -f videos/intentions.mp4 ] && [ "$(cat videos/intentions.until 2>/dev/null || echo 0)" -ge "$(TZ=Asia/Singapore date +%Y%m%d)" ]; then
+            C=intentions.mp4; echo "::notice::named intentions card (current until $(cat videos/intentions.until))"
+          elif [ -f videos/intentions_generic.mp4 ]; then
+            C=intentions_generic.mp4; echo "::notice::generic intentions card"
+          fi
+          if [ -n "$C" ]; then
+            printf "file '%s'\nfile '%s'\nfile '%s'\n" "$C" "$N.mp4" "$C" > videos/today.txt
+            V=videos/today.txt; echo "CONCAT=1" >> $GITHUB_ENV
+          fi
+          echo "V=$V" >> $GITHUB_ENV
+          echo "::notice::today: $MSET ($V) | test minutes: $TEST_MIN | start: ${START:-now}"
+      - name: Install ffmpeg
+        if: env.SKIP != '1'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+      - name: Wait for the start time
+        if: env.START != '' && env.SKIP != '1'
+        run: |
+          T=$(TZ=Asia/Singapore date -d "$START" +%s); N=$(date +%s)
+          if [ "$T" -gt "$N" ]; then echo "::notice::waiting $(( (T-N) )) s for $START SGT"; sleep $((T-N)); fi
+      - name: Stream to YouTube
+        if: env.SKIP != '1'
+        run: |
+          LIM=(); if [ "$TEST_MIN" != "0" ]; then LIM=(-t $((TEST_MIN*60))); fi
+          echo "::notice::streaming started $(TZ=Asia/Singapore date '+%a %d %b %H:%M:%S SGT')"
+          IN=(-i "$V"); if [ "${CONCAT:-0}" = "1" ]; then IN=(-f concat -safe 0 -i "$V"); fi
+          ffmpeg -hide_banner -loglevel warning -re "${IN[@]}" "${LIM[@]}" -c copy -f flv "rtmps://a.rtmps.youtube.com:443/live2/$KEY"
+          echo "::notice::streaming finished $(TZ=Asia/Singapore date '+%H:%M:%S SGT')"

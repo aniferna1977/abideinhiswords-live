@@ -61,8 +61,20 @@ jobs:
           elif [ -f videos/intentions_generic.mp4 ]; then
             C=intentions_generic.mp4; echo "::notice::generic intentions card"
           fi
-          if [ -n "$C" ]; then
-            printf "file '%s'\nfile '%s'\nfile '%s'\n" "$C" "$N.mp4" "$C" > videos/today.txt
+          # Feast-day opening (Anil's recording, Part F; 2 Nov 2026): on a date with videos/feast-MMDD.mp4 it is spliced in
+          # after the welcome, at the keyframe in the quiet gap before the Sign of the Cross (videos/<name>.cut, seconds).
+          F=""; D=$(TZ=Asia/Singapore date +%m%d)
+          if [ -f "videos/feast-$D.mp4" ] && [ -f "videos/$N.cut" ]; then F="feast-$D.mp4"; echo "::notice::feast-day opening $F at $(cat videos/$N.cut) s"; fi
+          if [ -n "$C" ] || [ -n "$F" ]; then
+            : > videos/today.txt
+            [ -n "$C" ] && printf "file '%s'\n" "$C" >> videos/today.txt
+            if [ -n "$F" ]; then
+              T=$(cat videos/$N.cut)
+              printf "file '%s'\noutpoint %s\nfile '%s'\nfile '%s'\ninpoint %s\n" "$N.mp4" "$T" "$F" "$N.mp4" "$T" >> videos/today.txt
+            else
+              printf "file '%s'\n" "$N.mp4" >> videos/today.txt
+            fi
+            [ -n "$C" ] && printf "file '%s'\n" "$C" >> videos/today.txt
             V=videos/today.txt; echo "CONCAT=1" >> $GITHUB_ENV
           fi
           echo "V=$V" >> $GITHUB_ENV

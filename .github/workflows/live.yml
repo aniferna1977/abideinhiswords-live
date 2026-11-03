@@ -16,6 +16,9 @@ on:
       start_sgt:
         description: "Start at this SGT time today (HH:MM), or blank to start now"
         default: ""
+      dry_run:
+        description: "true = check only: build today's stream into a file on the runner, nothing goes to YouTube"
+        default: "false"
   schedule:
     - cron: "30 10 * * *"   # 18:30 SGT daily; GitHub often starts scheduled runs 30-45 min late, so the job waits until 20:00 SGT
 concurrency: {group: live-rosary, cancel-in-progress: false}
@@ -24,15 +27,16 @@ permissions:
 jobs:
   live:
     if: github.event_name == 'workflow_dispatch' || vars.DAILY_LIVE != 'false'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04   # pinned (Anil, 3 Nov 2026) so a GitHub image change cannot surprise the 8 PM stream
     timeout-minutes: 200
     env:
       MSET: ${{ github.event.inputs.mset || 'auto' }}
       TEST_MIN: ${{ github.event.inputs.test_minutes || '0' }}
       START: ${{ github.event_name == 'schedule' && '20:00' || github.event.inputs.start_sgt }}
       KEY: ${{ secrets.YT_STREAM_KEY }}
+      DRY: ${{ github.event.inputs.dry_run || 'false' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: {lfs: false}
       - name: Check
         run: |
@@ -91,7 +95,12 @@ jobs:
         if: env.SKIP != '1'
         run: |
           LIM=(); if [ "$TEST_MIN" != "0" ]; then LIM=(-t $((TEST_MIN*60))); fi
-          echo "::notice::streaming started $(TZ=Asia/Singapore date '+%a %d %b %H:%M:%S SGT')"
           IN=(-i "$V"); if [ "${CONCAT:-0}" = "1" ]; then IN=(-f concat -safe 0 -i "$V"); fi
+          if [ "$DRY" = "true" ]; then
+            ffmpeg -hide_banner -loglevel warning "${IN[@]}" "${LIM[@]}" -c copy -f flv /tmp/check.flv
+            echo "::notice::dry run OK on $(. /etc/os-release; echo $PRETTY_NAME), $(ffmpeg -version | head -1 | cut -d' ' -f1-3): $(ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/check.flv) s built, nothing sent to YouTube"
+            exit 0
+          fi
+          echo "::notice::streaming started $(TZ=Asia/Singapore date '+%a %d %b %H:%M:%S SGT')"
           ffmpeg -hide_banner -loglevel warning -re "${IN[@]}" "${LIM[@]}" -c copy -f flv "rtmps://a.rtmps.youtube.com:443/live2/$KEY"
           echo "::notice::streaming finished $(TZ=Asia/Singapore date '+%H:%M:%S SGT')"

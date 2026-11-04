@@ -43,6 +43,11 @@ jobs:
           if [ "${{ github.event_name }}" = "schedule" ] && [ "$(TZ=Asia/Singapore date +%Y%m%d)" -lt 20261101 ]; then
             echo "::notice::daily Rosary starts on 1 Nov 2026 - nothing streamed today"; echo "SKIP=1" >> $GITHUB_ENV; exit 0
           fi
+          # a scheduled run that GitHub starts after 20:15 SGT would repeat or overlap the Rosary (4 Nov 2026: the schedule
+          # was over an hour late during a GitHub outage and the stream was started by hand) - skip it
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(TZ=Asia/Singapore date +%H%M)" -gt 2015 ]; then
+            echo "::notice::scheduled run started after 20:15 SGT - skipped (stream already started by hand)"; echo "SKIP=1" >> $GITHUB_ENV; exit 0
+          fi
           if [ -z "$KEY" ]; then echo "::error::secret YT_STREAM_KEY is not set - nothing streamed"; exit 1; fi
           if [ "$MSET" = "auto" ]; then
             case "$(TZ=Asia/Singapore date +%u)" in 1|6) MSET=joyful;; 2|5) MSET=sorrowful;; 3|7) MSET=glorious;; 4) MSET=luminous;; esac

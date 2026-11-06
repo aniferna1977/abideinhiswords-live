@@ -90,7 +90,20 @@ jobs:
           echo "::notice::today: $MSET ($V) | test minutes: $TEST_MIN | start: ${START:-now}"
       - name: Install ffmpeg
         if: env.SKIP != '1'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+        timeout-minutes: 12
+        # 6 Nov 2026: apt-get hung for 20+ min before the 8 PM stream (same hang as shorts.yml that day); each try is now
+        # capped, and a static ffmpeg build is the fallback
+        run: |
+          for i in 1 2; do
+            sudo timeout 150 apt-get update -qq && sudo timeout 200 apt-get install -y -qq ffmpeg > /dev/null && break
+            echo "::warning::apt try $i failed or timed out"
+          done
+          if ! command -v ffmpeg > /dev/null; then
+            curl -sSfL --max-time 180 https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | tar xJ -C /tmp
+            sudo cp /tmp/ffmpeg-*-amd64-static/ffmpeg /tmp/ffmpeg-*-amd64-static/ffprobe /usr/local/bin/
+            echo "::warning::using the static ffmpeg build"
+          fi
+          ffmpeg -version | head -1
       - name: Wait for the start time
         if: env.START != '' && env.SKIP != '1'
         run: |

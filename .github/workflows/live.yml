@@ -19,6 +19,9 @@ on:
       dry_run:
         description: "true = check only: build today's stream into a file on the runner, nothing goes to YouTube"
         default: "false"
+      seek_s:
+        description: "Resume N seconds into today's stream (after a dropped connection, 8 Nov 2026); 0 = from the start"
+        default: "0"
   schedule:
     - cron: "30 10 * * *"   # 18:30 SGT daily; GitHub often starts scheduled runs 30-45 min late, so the job waits until 20:00 SGT
 concurrency: {group: live-rosary, cancel-in-progress: false}
@@ -114,6 +117,7 @@ jobs:
         run: |
           LIM=(); if [ "$TEST_MIN" != "0" ]; then LIM=(-t $((TEST_MIN*60))); fi
           IN=(-i "$V"); if [ "${CONCAT:-0}" = "1" ]; then IN=(-f concat -safe 0 -i "$V"); fi
+          SEEK="${{ github.event.inputs.seek_s }}"; if [ -n "$SEEK" ] && [ "$SEEK" != "0" ]; then IN=(-ss "$SEEK" "${IN[@]}"); echo "::notice::resuming $SEEK s in"; fi
           if [ "$DRY" = "true" ]; then
             ffmpeg -hide_banner -loglevel warning "${IN[@]}" "${LIM[@]}" -c copy -f flv /tmp/check.flv
             echo "::notice::dry run OK on $(. /etc/os-release; echo $PRETTY_NAME), $(ffmpeg -version | head -1 | cut -d' ' -f1-3): $(ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/check.flv) s built, nothing sent to YouTube"

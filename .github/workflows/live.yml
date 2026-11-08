@@ -117,12 +117,29 @@ jobs:
         run: |
           LIM=(); if [ "$TEST_MIN" != "0" ]; then LIM=(-t $((TEST_MIN*60))); fi
           IN=(-i "$V"); if [ "${CONCAT:-0}" = "1" ]; then IN=(-f concat -safe 0 -i "$V"); fi
-          SEEK="${{ github.event.inputs.seek_s }}"; if [ -n "$SEEK" ] && [ "$SEEK" != "0" ]; then IN=(-ss "$SEEK" "${IN[@]}"); echo "::notice::resuming $SEEK s in"; fi
+          SEEK="${{ github.event.inputs.seek_s }}"; if [ -n "$SEEK" ] && [ "$SEEK" != "0" ]; then echo "::notice::resuming $SEEK s in"; fi
           if [ "$DRY" = "true" ]; then
             ffmpeg -hide_banner -loglevel warning "${IN[@]}" "${LIM[@]}" -c copy -f flv /tmp/check.flv
             echo "::notice::dry run OK on $(. /etc/os-release; echo $PRETTY_NAME), $(ffmpeg -version | head -1 | cut -d' ' -f1-3): $(ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/check.flv) s built, nothing sent to YouTube"
             exit 0
           fi
           echo "::notice::streaming started $(TZ=Asia/Singapore date '+%a %d %b %H:%M:%S SGT')"
-          ffmpeg -hide_banner -loglevel warning -re "${IN[@]}" "${LIM[@]}" -c copy -f flv "rtmps://a.rtmps.youtube.com:443/live2/$KEY"
+          # 8 Nov 2026: YouTube reset the RTMPS connection 17 min in and the Rosary stopped. If ffmpeg ends with an error
+          # before the end, reconnect within seconds and carry on from where it stopped (a few seconds earlier, for
+          # continuity), up to 6 times. -re keeps media time equal to wall-clock time, so elapsed time gives the position.
+          if [ "${CONCAT:-0}" = "1" ]; then TOTAL=$(ffprobe -v error -f concat -safe 0 -i "$V" -show_entries format=duration -of csv=p=0)
+          else TOTAL=$(ffprobe -v error -i "$V" -show_entries format=duration -of csv=p=0); fi
+          TOTAL=${TOTAL%.*}; if [ "$TEST_MIN" != "0" ]; then TOTAL=$((TEST_MIN*60)); fi
+          POS=${SEEK:-0}; [ -z "$POS" ] && POS=0; TRY=0
+          BASE=(-i "$V"); if [ "${CONCAT:-0}" = "1" ]; then BASE=(-f concat -safe 0 -i "$V"); fi
+          while :; do
+            T0=$(date +%s); IN=("${BASE[@]}"); if [ "$POS" -gt 0 ]; then IN=(-ss "$POS" "${BASE[@]}"); fi
+            LIM=(); if [ "$TEST_MIN" != "0" ]; then LIM=(-t $((TOTAL-POS))); fi
+            if ffmpeg -hide_banner -loglevel warning -re "${IN[@]}" "${LIM[@]}" -c copy -f flv "rtmps://a.rtmps.youtube.com:443/live2/$KEY"; then break; fi
+            POS=$((POS + $(date +%s) - T0 - 5)); [ "$POS" -lt 0 ] && POS=0; TRY=$((TRY+1))
+            if [ $((TOTAL - POS)) -lt 30 ]; then echo "::warning::connection dropped in the last 30 s - not resuming"; break; fi
+            if [ "$TRY" -gt 6 ]; then echo "::error::connection dropped $TRY times - giving up at ${POS}s of ${TOTAL}s"; exit 1; fi
+            echo "::warning::connection dropped at $(TZ=Asia/Singapore date '+%H:%M:%S SGT') - reconnect $TRY, resuming at ${POS}s of ${TOTAL}s"
+            sleep 3
+          done
           echo "::notice::streaming finished $(TZ=Asia/Singapore date '+%H:%M:%S SGT')"

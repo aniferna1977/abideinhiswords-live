@@ -24,6 +24,8 @@ on:
         default: "0"
   schedule:
     - cron: "30 10 * * *"   # 18:30 SGT daily; GitHub often starts scheduled runs 30-45 min late, so the job waits until 20:00 SGT
+    - cron: "45 8 * * *"    # 16:45 SGT backup (13 Nov 2026: the 18:30 start did not arrive on 12 or 13 Nov - one came 8 h late);
+                            # the concurrency group queues a second run behind the first, and it then skips itself (after 20:15 SGT)
 concurrency: {group: live-rosary, cancel-in-progress: false}
 permissions:
   contents: read
@@ -31,7 +33,7 @@ jobs:
   live:
     if: github.event_name == 'workflow_dispatch' || vars.DAILY_LIVE != 'false'
     runs-on: ubuntu-26.04   # pinned (Anil, 3 Nov 2026) so a GitHub image change cannot surprise the 8 PM stream
-    timeout-minutes: 200
+    timeout-minutes: 300   # was 200; the 16:45 backup start waits ~3 h 15 min before the stream (13 Nov 2026)
     env:
       MSET: ${{ github.event.inputs.mset || 'auto' }}
       TEST_MIN: ${{ github.event.inputs.test_minutes || '0' }}
@@ -50,6 +52,11 @@ jobs:
           # was over an hour late during a GitHub outage and the stream was started by hand) - skip it
           if [ "${{ github.event_name }}" = "schedule" ] && [ "$(TZ=Asia/Singapore date +%H%M)" -gt 2015 ]; then
             echo "::notice::scheduled run started after 20:15 SGT - skipped (stream already started by hand)"; echo "SKIP=1" >> $GITHUB_ENV; exit 0
+          fi
+          # a scheduled run that GitHub starts before 16:00 SGT is a stale one from the previous evening (12 Nov 2026: the 18:30
+          # start arrived at 02:28) - skip it so it does not hold the live-rosary queue all day (13 Nov 2026)
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(TZ=Asia/Singapore date +%H%M)" -lt 1600 ]; then
+            echo "::notice::scheduled run started before 16:00 SGT (stale) - skipped"; echo "SKIP=1" >> $GITHUB_ENV; exit 0
           fi
           if [ -z "$KEY" ]; then echo "::error::secret YT_STREAM_KEY is not set - nothing streamed"; exit 1; fi
           if [ "$MSET" = "auto" ]; then
